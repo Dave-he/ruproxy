@@ -248,13 +248,8 @@ impl Runnable for DefaultRouter {
 #[async_trait]
 impl Router for DefaultRouter {
     async fn pick_route(&self, context: &Context) -> CoreResult<Route> {
-        // Clone rules to avoid holding lock across await
-        let rules = {
-            let rules_guard = self.rules.read();
-            rules_guard.clone()
-        };
-        
-        for rule in rules.iter() {
+        let rules_guard = self.rules.read();
+        for rule in rules_guard.iter() {
             if rule.matches(context) {
                 let route = Route::new(context.clone(), rule.outbound_tag().to_string());
                 let route = if let Some(tag) = rule.rule_tag() {

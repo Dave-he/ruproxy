@@ -98,17 +98,17 @@ pub fn manager_type() -> TypeId {
 
 /// Default implementation of outbound manager
 pub struct DefaultManager {
-    handlers: std::collections::HashMap<String, Arc<dyn Handler>>,
-    default_handler: Option<Arc<dyn Handler>>,
-    running: bool,
+    handlers: parking_lot::RwLock<std::collections::HashMap<String, Arc<dyn Handler>>>,
+    default_handler: parking_lot::RwLock<Option<Arc<dyn Handler>>>,
+    running: parking_lot::RwLock<bool>,
 }
 
 impl DefaultManager {
     pub fn new() -> Self {
         Self {
-            handlers: std::collections::HashMap::new(),
-            default_handler: None,
-            running: false,
+            handlers: parking_lot::RwLock::new(std::collections::HashMap::new()),
+            default_handler: parking_lot::RwLock::new(None),
+            running: parking_lot::RwLock::new(false),
         }
     }
 }
@@ -149,56 +149,44 @@ impl Runnable for DefaultManager {
 #[async_trait]
 impl Manager for DefaultManager {
     fn get_handler(&self, tag: &str) -> Option<Arc<dyn Handler>> {
-        self.handlers.get(tag).cloned()
+        self.handlers.read().get(tag).cloned()
     }
     
     fn get_default_handler(&self) -> Option<Arc<dyn Handler>> {
-        self.default_handler.clone()
+        self.default_handler.read().clone()
     }
     
     async fn add_handler(&self, handler: Arc<dyn Handler>) -> CoreResult<()> {
         let tag = handler.tag().to_string();
         
-        if self.handlers.contains_key(&tag) {
+        if self.handlers.read().contains_key(&tag) {
             return Err(CoreError::FeatureAlreadyExists(format!(
                 "Outbound handler with tag '{}' already exists", tag
             )));
         }
-        
-        // Set as default if it's the first handler
         {
             let mut default = self.default_handler.write();
-            if default.is_none() {
-                *default = Some(handler.clone());
-            }
+            if default.is_none() { *default = Some(handler.clone()); }
+            self.handlers.write().insert(tag.clone(), handler.clone());
         }
-        
-        self.handlers.insert(tag.clone(), handler.clone());
-        
-        // Start the handler if manager is running
-        let is_running = {
-            let running = self.running.read();
-            *running
-        };
-        if is_running {
-            handler.start().await?;
-        }
+        let is_running = *self.running.read();
+        if is_running { handler.start().await?; }
         
         tracing::info!("Added outbound handler: {}", tag);
         Ok(())
     }
     
     async fn remove_handler(&self, tag: &str) -> CoreResult<()> {
-        if let Some((_, handler)) = self.handlers.remove(tag) {
-            // Update default handler if necessary
-            {
-                let mut default = self.default_handler.write();
-                if let Some(ref default_handler) = *default {
-                    if default_handler.tag() == tag {
-                        *default = self.handlers.iter().next().map(|entry| entry.value().clone());
-                    }
-                }
+        let handler = {
+            let mut map = self.handlers.write();
+            let h = map.remove(tag);
+            let mut default = self.default_handler.write();
+            if default.as_ref().map(|dh| dh.tag() == tag).unwrap_or(false) {
+                *default = map.values().next().cloned();
             }
+            h
+        };
+        if let Some(handler) = handler {
             
             if let Err(e) = handler.close().await {
                 tracing::warn!("Failed to close outbound handler {}: {}", tag, e);
@@ -212,7 +200,7 @@ impl Manager for DefaultManager {
     }
     
     fn list_handlers(&self) -> Vec<Arc<dyn Handler>> {
-        self.handlers.iter().map(|entry| entry.value().clone()).collect()
+        self.handlers.read().values().cloned().collect()
     }
 }
 

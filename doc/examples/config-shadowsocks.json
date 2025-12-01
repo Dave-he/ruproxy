@@ -1,0 +1,21 @@
+{
+  "log": { "level": "info" },
+  "inbounds": [
+    { "tag": "ss-in", "listen": "0.0.0.0", "port": 8388, "protocol": "shadowsocks",
+      "settings": { "address": null, "port": 8388, "method": "aes-256-gcm", "password": "your-password", "udp": true }
+    }
+  ],
+  "outbounds": [
+    { "tag": "direct-out", "protocol": "direct" },
+    { "tag": "ss-out", "protocol": "shadowsocks",
+      "settings": { "address": "example.com", "port": 8388, "method": "aes-256-gcm", "password": "your-password", "udp": true }
+    }
+  ],
+  "routing": {
+    "rules": [
+      { "tag": "local", "domain": ["localhost", "127.0.0.1"], "outbound_tag": "direct-out" },
+      { "tag": "proxy", "outbound_tag": "ss-out" }
+    ]
+  }
+}
+

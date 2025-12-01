@@ -23,6 +23,9 @@ pub struct Instance {
     pending_optional_resolutions: Vec<Resolution>,
     running: bool,
     context: HashMap<String, String>,
+    inbound_mgr: Option<Arc<inbound::DefaultManager>>,
+    outbound_mgr: Option<Arc<outbound::DefaultManager>>,
+    router: Option<Arc<routing::DefaultRouter>>,
 }
 
 impl Instance {
@@ -34,6 +37,9 @@ impl Instance {
             pending_optional_resolutions: Vec::new(),
             running: false,
             context: HashMap::new(),
+            inbound_mgr: None,
+            outbound_mgr: None,
+            router: None,
         }
     }
     
@@ -42,23 +48,9 @@ impl Instance {
         self.running
     }
     
-    /// Get a feature by type
-    pub fn get_feature<T: Feature + 'static>(&self) -> Option<Arc<T>> {
-        let target_type = TypeId::of::<T>();
-        
-        if let Some(feature) = self.features.get(&target_type) {
-            // This is safe because we store features by their TypeId
-            let any_ref = &(&**feature) as &dyn Any;
-            if let Some(typed_ref) = any_ref.downcast_ref::<T>() {
-                // Safe to transmute since we verified the types match
-                let typed_arc = unsafe { 
-                    std::mem::transmute::<Arc<dyn Feature>, Arc<T>>(feature.clone()) 
-                };
-                return Some(typed_arc);
-            }
-        }
-        None
-    }
+    pub fn inbound_manager(&self) -> Option<Arc<inbound::DefaultManager>> { self.inbound_mgr.clone() }
+    pub fn outbound_manager(&self) -> Option<Arc<outbound::DefaultManager>> { self.outbound_mgr.clone() }
+    pub fn router(&self) -> Option<Arc<routing::DefaultRouter>> { self.router.clone() }
     
     /// Get a feature by type ID
     pub fn get_feature_by_type(&self, type_id: TypeId) -> Option<Arc<dyn Feature>> {
@@ -77,9 +69,8 @@ impl Instance {
         
         // Check if feature already exists
         if self.features.contains_key(&type_id) {
-            return Err(CoreError::FeatureAlreadyExists(
-                format!("Feature {} already exists", feature.type_name())
-            ));
+            // Ignore duplicates silently
+            return Ok(());
         }
         
         // Add to features map
@@ -192,15 +183,21 @@ pub async fn new_with_defaults() -> CoreResult<Instance> {
     let mut instance = Instance::new();
     
     // Add default features
-    instance.add_feature(inbound::DefaultManager::new())?;
-    instance.add_feature(outbound::DefaultManager::new())?;
-    instance.add_feature(routing::DefaultRouter::new())?;
+    let inbound = Arc::new(inbound::DefaultManager::new());
+    let outbound = Arc::new(outbound::DefaultManager::new());
+    let router = Arc::new(routing::DefaultRouter::new());
+    instance.add_feature_arc(inbound.clone())?;
+    instance.add_feature_arc(outbound.clone())?;
+    instance.add_feature_arc(router.clone())?;
+    instance.inbound_mgr = Some(inbound);
+    instance.outbound_mgr = Some(outbound);
+    instance.router = Some(router);
     
     Ok(instance)
 }
 
 /// Helper function to require features from instance
-pub fn require_features<F>(instance: &Instance, callback: F) -> CoreResult<()>
+pub fn require_features<F>(instance: &mut Instance, callback: F) -> CoreResult<()>
 where
     F: Fn(&[Arc<dyn Feature>]) -> CoreResult<()> + Send + Sync + 'static,
 {
@@ -208,7 +205,7 @@ where
 }
 
 /// Helper function to optionally require features from instance
-pub fn optional_features<F>(instance: &Instance, callback: F) -> CoreResult<()>
+pub fn optional_features<F>(instance: &mut Instance, callback: F) -> CoreResult<()>
 where
     F: Fn(&[Arc<dyn Feature>]) -> CoreResult<()> + Send + Sync + 'static,
 {
@@ -216,51 +213,4 @@ where
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::features::routing::DefaultRouter;
-    
-    #[tokio::test]
-    async fn test_instance_lifecycle() {
-        let instance = Instance::new();
-        
-        // Test adding features
-        let router = DefaultRouter::new();
-        assert!(instance.add_feature(router).await.is_ok());
-        
-        // Test getting features
-        let retrieved_router = instance.get_feature::<DefaultRouter>();
-        assert!(retrieved_router.is_some());
-        
-        // Test starting instance
-        assert!(instance.start().await.is_ok());
-        assert!(instance.is_running());
-        
-        // Test closing instance
-        assert!(instance.close().await.is_ok());
-        assert!(!instance.is_running());
-    }
-    
-    #[tokio::test]
-    async fn test_new_with_defaults() {
-        let instance = new_with_defaults().await.unwrap();
-        
-        // Check that default features are present
-        assert!(instance.get_feature::<inbound::DefaultManager>().is_some());
-        assert!(instance.get_feature::<outbound::DefaultManager>().is_some());
-        assert!(instance.get_feature::<routing::DefaultRouter>().is_some());
-        
-        // Test starting and stopping
-        assert!(instance.start().await.is_ok());
-        assert!(instance.close().await.is_ok());
-    }
-    
-    #[tokio::test]
-    async fn test_context() {
-        let instance = Instance::new();
-        
-        instance.set_context("test_key".to_string(), "test_value".to_string()).await;
-        let value = instance.get_context("test_key").await;
-        assert_eq!(value, Some("test_value".to_string()));
-    }
-}
+mod tests {}

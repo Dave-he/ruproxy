@@ -27,6 +27,7 @@ pub struct Config {
     pub stats: Option<StatsConfig>,
     
     /// Additional application configurations
+    #[serde(default)]
     pub apps: Vec<AppConfig>,
 }
 
@@ -282,6 +283,7 @@ pub struct RoutingRule {
     pub attrs: Option<HashMap<String, String>>,
     
     /// Outbound tag
+    #[serde(alias = "outboundTag")]
     pub outbound_tag: String,
     
     /// Balancer tag
@@ -555,5 +557,17 @@ mod tests {
         
         // Should pass now
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_outbound_tag_alias() {
+        let json = r#"{
+            "inbounds": [{"port":8080, "protocol":"direct"}],
+            "outbounds": [{"tag":"direct", "protocol":"direct"}],
+            "routing": {"rules": [{"type":"field", "outboundTag":"direct"}]}
+        }"#;
+        let cfg = Config::from_json(json).unwrap();
+        assert!(cfg.routing.is_some());
+        assert_eq!(cfg.routing.as_ref().unwrap().rules[0].outbound_tag, "direct");
     }
 }

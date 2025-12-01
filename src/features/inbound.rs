@@ -44,6 +44,16 @@ pub trait Handler: Feature {
         stream: TcpStream,
         context: InboundContext,
     ) -> CoreResult<()>;
+
+    /// Optional: prepare outbound dispatch by extracting target and wrapping the client stream
+    /// Default: not supported
+    async fn prepare_dispatch(
+        &self,
+        _stream: TcpStream,
+        _context: &InboundContext,
+    ) -> CoreResult<(crate::features::outbound::OutboundContext, crate::features::outbound::Link)> {
+        Err(CoreError::ProtocolError("prepare_dispatch not supported".to_string()))
+    }
     
     /// Get receiver settings (for configuration)
     fn receiver_settings(&self) -> Option<serde_json::Value> {
@@ -79,17 +89,17 @@ pub fn manager_type() -> TypeId {
 
 /// Default implementation of inbound manager
 pub struct DefaultManager {
-    handlers: std::collections::HashMap<String, Arc<dyn Handler>>,
-    untagged_handlers: Vec<Arc<dyn Handler>>,
-    running: bool,
+    handlers: parking_lot::RwLock<std::collections::HashMap<String, Arc<dyn Handler>>>,
+    untagged_handlers: parking_lot::RwLock<Vec<Arc<dyn Handler>>>,
+    running: parking_lot::RwLock<bool>,
 }
 
 impl DefaultManager {
     pub fn new() -> Self {
         Self {
-            handlers: std::collections::HashMap::new(),
-            untagged_handlers: Vec::new(),
-            running: false,
+            handlers: parking_lot::RwLock::new(std::collections::HashMap::new()),
+            untagged_handlers: parking_lot::RwLock::new(Vec::new()),
+            running: parking_lot::RwLock::new(false),
         }
     }
 }
@@ -131,6 +141,7 @@ impl Runnable for DefaultManager {
 impl Manager for DefaultManager {
     async fn get_handler(&self, tag: &str) -> CoreResult<Arc<dyn Handler>> {
         self.handlers
+            .read()
             .get(tag)
             .cloned()
             .ok_or_else(|| CoreError::FeatureNotFound(format!("Handler not found: {}", tag)))
@@ -140,25 +151,18 @@ impl Manager for DefaultManager {
         let tag = handler.tag();
         
         if tag.is_empty() {
-            // Add to untagged handlers
             let mut untagged = self.untagged_handlers.write();
             untagged.push(handler.clone());
         } else {
-            // Add to tagged handlers
-            if self.handlers.contains_key(tag) {
+            let mut handlers = self.handlers.write();
+            if handlers.contains_key(tag) {
                 return Err(CoreError::FeatureAlreadyExists(format!(
                     "Handler with tag '{}' already exists", tag
                 )));
             }
-            self.handlers.insert(tag.to_string(), handler.clone());
+            handlers.insert(tag.to_string(), handler.clone());
         }
-        
-        // Start the handler if manager is running
-        let is_running = {
-            let running = self.running.read();
-            *running
-        };
-        if is_running {
+        if *self.running.read() {
             handler.start().await?;
         }
         
@@ -171,7 +175,8 @@ impl Manager for DefaultManager {
             return Err(CoreError::InvalidConfiguration("Empty tag".to_string()));
         }
         
-        if let Some((_, handler)) = self.handlers.remove(tag) {
+        let handler = { let mut h = self.handlers.write(); h.remove(tag) };
+        if let Some(handler) = handler {
             if let Err(e) = handler.close().await {
                 tracing::warn!("Failed to close handler {}: {}", tag, e);
             }
@@ -183,21 +188,11 @@ impl Manager for DefaultManager {
     }
     
     async fn list_handlers(&self) -> Vec<Arc<dyn Handler>> {
-        let mut handlers = Vec::new();
-        
-        // Add tagged handlers
-        for handler_ref in self.handlers.iter() {
-            handlers.push(handler_ref.value().clone());
-        }
-        
-        // Add untagged handlers
-        let untagged_handlers = {
-            let untagged = self.untagged_handlers.read();
-            untagged.clone()
-        };
-        handlers.extend(untagged_handlers.iter().cloned());
-        
-        handlers
+        let mut list = Vec::new();
+        for h in self.handlers.read().values() { list.push(h.clone()); }
+        let untag = self.untagged_handlers.read().clone();
+        list.extend(untag.into_iter());
+        list
     }
 }
 
