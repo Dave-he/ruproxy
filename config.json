@@ -1,0 +1,31 @@
+{
+  "log": {
+    "level": "info"
+  },
+  "inbounds": [
+    {
+      "tag": "socks",
+      "port": 1080,
+      "protocol": "socks",
+      "settings": {
+        "auth": "noauth",
+        "udp": true
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "direct",
+      "protocol": "freedom",
+      "settings": {}
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "outboundTag": "direct"
+      }
+    ]
+  }
+}
