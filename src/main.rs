@@ -3,7 +3,7 @@ use rust_core::{
     config::Config,
     core::{Instance, new_with_defaults},
     features::{inbound, outbound, routing},
-    protocols::{direct, shadowsocks, create_socks_inbound, SocksConfig, create_http_inbound, HttpInboundConfig},
+    protocols::{direct, shadowsocks, create_socks_inbound, SocksConfig, create_http_inbound, HttpInboundConfig, create_tcp_forward_inbound, TcpForwardConfig},
     CoreResult,
 };
 use rust_core::Runnable;
@@ -121,6 +121,17 @@ async fn run_server(config_path: PathBuf, test_only: bool) -> CoreResult<()> {
                 let handler = create_http_inbound(tag, cfg);
                 inbound_mgr.add_handler(handler).await?;
             }
+            "tcp" => {
+                if let Some(settings) = &inbound_config.settings {
+                    let cfg: TcpForwardConfig = serde_json::from_value(settings.clone())?;
+                    let handler = create_tcp_forward_inbound(tag, cfg);
+                    inbound_mgr.add_handler(handler).await?;
+                } else {
+                    return Err(rust_core::CoreError::InvalidConfiguration(
+                        "tcp inbound requires settings { address, port }".to_string()
+                    ));
+                }
+            }
             protocol => {
                 error!("Unsupported inbound protocol: {}", protocol);
                 return Err(rust_core::CoreError::InvalidConfiguration(
@@ -181,14 +192,12 @@ async fn run_server(config_path: PathBuf, test_only: bool) -> CoreResult<()> {
                         let ictx = inbound::InboundContext::new(peer, peer, protocol_c.clone(), tag_c.clone());
                         match mgr.get_handler(&tag_c).await {
                             Ok(handler) => {
-                                if protocol_c == "socks" {
+                                if protocol_c == "socks" || protocol_c == "http" || protocol_c == "tcp" {
                                     match handler.prepare_dispatch(stream, &ictx).await {
                                         Ok((out_ctx, link)) => {
-                                            // Build routing context (placeholder)
                                             let _rctx = routing::Context::new(peer, out_ctx.destination_addr)
                                                 .with_inbound_tag(tag_c.clone())
                                                 .with_protocol(protocol_c.clone());
-                                            // For now, use default outbound or direct tag
                                             let ob = outbound_mgr_cloned.get_default_handler()
                                                 .or_else(|| outbound_mgr_cloned.get_handler("direct"));
                                             if let Some(h) = ob {
@@ -200,7 +209,7 @@ async fn run_server(config_path: PathBuf, test_only: bool) -> CoreResult<()> {
                                             }
                                         }
                                         Err(e) => {
-                                            tracing::error!("Socks prepare_dispatch error: {}", e);
+                                            tracing::error!("prepare_dispatch error on {}: {}", protocol_c, e);
                                         }
                                     }
                                 } else {
@@ -243,13 +252,14 @@ async fn generate_config(output_path: PathBuf) -> CoreResult<()> {
     
     let mut config = Config::default();
     
-    // Add sample inbound
+    // Add sample TCP port mapping inbound: listen 127.0.0.1:8080 -> example.com:80
+    let tcp_cfg = TcpForwardConfig { address: "example.com".to_string(), port: 80 };
     config.inbounds.push(rust_core::config::InboundConfig {
-        tag: Some("http-in".to_string()),
+        tag: Some("tcp-map".to_string()),
         listen: Some("127.0.0.1".to_string()),
         port: 8080,
-        protocol: "direct".to_string(),
-        settings: None,
+        protocol: "tcp".to_string(),
+        settings: Some(serde_json::to_value(tcp_cfg)?),
         stream_settings: None,
         sniffing: None,
     });
