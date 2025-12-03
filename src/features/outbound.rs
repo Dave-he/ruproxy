@@ -132,15 +132,21 @@ impl HasType for DefaultManager {
 #[async_trait]
 impl Runnable for DefaultManager {
     async fn start(&self) -> CoreResult<()> {
-        // Note: This implementation is simplified due to the change from concurrent data structures
-        // to simple collections. In a real implementation, you would need proper synchronization.
+        *self.running.write() = true;
+        let handlers: Vec<Arc<dyn Handler>> = self.handlers.read().values().cloned().collect();
+        let default = self.default_handler.read().clone();
+        for handler in handlers { let _ = handler.start().await; }
+        if let Some(h) = default { let _ = h.start().await; }
         tracing::info!("Outbound manager started");
         Ok(())
     }
     
     async fn close(&self) -> CoreResult<()> {
-        // Note: This implementation is simplified due to the change from concurrent data structures
-        // to simple collections. In a real implementation, you would need proper synchronization.
+        *self.running.write() = false;
+        let handlers: Vec<Arc<dyn Handler>> = self.handlers.read().values().cloned().collect();
+        let default = self.default_handler.read().clone();
+        for handler in handlers { let _ = handler.close().await; }
+        if let Some(h) = default { let _ = h.close().await; }
         tracing::info!("Outbound manager closed");
         Ok(())
     }

@@ -198,19 +198,23 @@ mod tests {
     struct TestType;
     impl_has_type!(TestType);
     impl_runnable!(TestType);
+    #[async_trait::async_trait]
+    impl Closable for TestType {
+        async fn close(&self) -> CoreResult<()> { Ok(()) }
+    }
     
     #[tokio::test]
     async fn test_has_type() {
         let test_obj = TestType;
-        assert_eq!(test_obj.type_id(), TypeId::of::<TestType>());
-        assert_eq!(test_obj.type_name(), "rust_core::common::tests::TestType");
+        assert_eq!(crate::common::HasType::type_id(&test_obj), TypeId::of::<TestType>());
+        assert_eq!(crate::common::HasType::type_name(&test_obj), "rust_core::common::tests::TestType");
     }
     
     #[tokio::test]
     async fn test_runnable() {
         let test_obj = TestType;
         assert!(test_obj.start().await.is_ok());
-        assert!(test_obj.close().await.is_ok());
+        assert!(crate::common::Runnable::close(&test_obj).await.is_ok());
     }
     
     #[tokio::test]

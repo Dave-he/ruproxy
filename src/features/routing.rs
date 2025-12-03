@@ -196,6 +196,120 @@ impl Rule for IpRule {
     }
 }
 
+/// Inbound tag based routing rule
+pub struct InboundTagRule {
+    pub tags: Vec<String>,
+    pub outbound_tag: String,
+    pub rule_tag: Option<String>,
+}
+
+impl InboundTagRule {
+    pub fn new(tags: Vec<String>, outbound_tag: String) -> Self {
+        Self { tags, outbound_tag, rule_tag: None }
+    }
+    pub fn with_tag(mut self, tag: String) -> Self { self.rule_tag = Some(tag); self }
+}
+
+impl Rule for InboundTagRule {
+    fn matches(&self, context: &Context) -> bool {
+        self.tags.iter().any(|t| t == &context.inbound_tag)
+    }
+    fn outbound_tag(&self) -> &str { &self.outbound_tag }
+    fn rule_tag(&self) -> Option<&str> { self.rule_tag.as_deref() }
+}
+
+/// Protocol based routing rule
+pub struct ProtocolRule {
+    pub protocols: Vec<String>,
+    pub outbound_tag: String,
+    pub rule_tag: Option<String>,
+}
+
+impl ProtocolRule {
+    pub fn new(protocols: Vec<String>, outbound_tag: String) -> Self {
+        Self { protocols, outbound_tag, rule_tag: None }
+    }
+    pub fn with_tag(mut self, tag: String) -> Self { self.rule_tag = Some(tag); self }
+}
+
+impl Rule for ProtocolRule {
+    fn matches(&self, context: &Context) -> bool {
+        self.protocols.iter().any(|p| p == &context.protocol)
+    }
+    fn outbound_tag(&self) -> &str { &self.outbound_tag }
+    fn rule_tag(&self) -> Option<&str> { self.rule_tag.as_deref() }
+}
+
+/// Destination port based routing rule
+pub struct PortRule {
+    ranges: Vec<(u16,u16)>,
+    outbound_tag: String,
+    rule_tag: Option<String>,
+}
+
+impl PortRule {
+    pub fn new(spec: &str, outbound_tag: String) -> Self {
+        let mut ranges = Vec::new();
+        for part in spec.split(',') {
+            let p = part.trim();
+            if p.is_empty() { continue; }
+            if let Some((a,b)) = p.split_once('-') {
+                let s = a.trim().parse::<u16>().unwrap_or(0);
+                let e = b.trim().parse::<u16>().unwrap_or(0);
+                if s > 0 && e > 0 { ranges.push((s.min(e), s.max(e))); }
+            } else {
+                if let Ok(v) = p.parse::<u16>() { ranges.push((v,v)); }
+            }
+        }
+        Self { ranges, outbound_tag, rule_tag: None }
+    }
+    pub fn with_tag(mut self, tag: String) -> Self { self.rule_tag = Some(tag); self }
+}
+
+impl Rule for PortRule {
+    fn matches(&self, context: &Context) -> bool {
+        let port = context.destination_addr.port();
+        self.ranges.iter().any(|(s,e)| port >= *s && port <= *e)
+    }
+    fn outbound_tag(&self) -> &str { &self.outbound_tag }
+    fn rule_tag(&self) -> Option<&str> { self.rule_tag.as_deref() }
+}
+
+/// Source port based routing rule
+pub struct SourcePortRule {
+    ranges: Vec<(u16,u16)>,
+    outbound_tag: String,
+    rule_tag: Option<String>,
+}
+
+impl SourcePortRule {
+    pub fn new(spec: &str, outbound_tag: String) -> Self {
+        let mut ranges = Vec::new();
+        for part in spec.split(',') {
+            let p = part.trim();
+            if p.is_empty() { continue; }
+            if let Some((a,b)) = p.split_once('-') {
+                let s = a.trim().parse::<u16>().unwrap_or(0);
+                let e = b.trim().parse::<u16>().unwrap_or(0);
+                if s > 0 && e > 0 { ranges.push((s.min(e), s.max(e))); }
+            } else {
+                if let Ok(v) = p.parse::<u16>() { ranges.push((v,v)); }
+            }
+        }
+        Self { ranges, outbound_tag, rule_tag: None }
+    }
+    pub fn with_tag(mut self, tag: String) -> Self { self.rule_tag = Some(tag); self }
+}
+
+impl Rule for SourcePortRule {
+    fn matches(&self, context: &Context) -> bool {
+        let port = context.source_addr.port();
+        self.ranges.iter().any(|(s,e)| port >= *s && port <= *e)
+    }
+    fn outbound_tag(&self) -> &str { &self.outbound_tag }
+    fn rule_tag(&self) -> Option<&str> { self.rule_tag.as_deref() }
+}
+
 /// Default router implementation
 pub struct DefaultRouter {
     rules: parking_lot::RwLock<Vec<Box<dyn Rule>>>,
@@ -370,5 +484,26 @@ mod tests {
         
         let route = router.pick_route(&context_with_domain).await.unwrap();
         assert_eq!(route.outbound_tag, "proxy");
+    }
+
+    #[tokio::test]
+    async fn test_additional_rules() {
+        let mut context = Context::new(
+            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127,0,0,1), 5555)),
+            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(8,8,8,8), 443)),
+        ).with_inbound_tag("in-socks".to_string()).with_protocol("socks".to_string());
+
+        let inbound_rule = InboundTagRule::new(vec!["in-socks".to_string()], "proxy".to_string());
+        assert!(inbound_rule.matches(&context));
+        assert_eq!(inbound_rule.outbound_tag(), "proxy");
+
+        let proto_rule = ProtocolRule::new(vec!["http".to_string(), "socks".to_string()], "proxy".to_string());
+        assert!(proto_rule.matches(&context));
+
+        let port_rule = PortRule::new("80,443,8080-8081", "proxy".to_string());
+        assert!(port_rule.matches(&context));
+
+        let source_rule = SourcePortRule::new("1024-65535", "proxy".to_string());
+        assert!(source_rule.matches(&context));
     }
 }

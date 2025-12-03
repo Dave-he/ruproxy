@@ -123,15 +123,21 @@ impl HasType for DefaultManager {
 #[async_trait]
 impl Runnable for DefaultManager {
     async fn start(&self) -> CoreResult<()> {
-        // Note: This implementation is simplified due to the change from concurrent data structures
-        // to simple collections. In a real implementation, you would need proper synchronization.
+        *self.running.write() = true;
+        let handlers: Vec<Arc<dyn Handler>> = self.handlers.read().values().cloned().collect();
+        let untagged: Vec<Arc<dyn Handler>> = self.untagged_handlers.read().iter().cloned().collect();
+        for handler in handlers { let _ = handler.start().await; }
+        for handler in untagged { let _ = handler.start().await; }
         tracing::info!("Inbound manager started");
         Ok(())
     }
     
     async fn close(&self) -> CoreResult<()> {
-        // Note: This implementation is simplified due to the change from concurrent data structures
-        // to simple collections. In a real implementation, you would need proper synchronization.
+        *self.running.write() = false;
+        let handlers: Vec<Arc<dyn Handler>> = self.handlers.read().values().cloned().collect();
+        let untagged: Vec<Arc<dyn Handler>> = self.untagged_handlers.read().iter().cloned().collect();
+        for handler in handlers { let _ = handler.close().await; }
+        for handler in untagged { let _ = handler.close().await; }
         tracing::info!("Inbound manager closed");
         Ok(())
     }

@@ -229,6 +229,8 @@ pub fn is_method_supported(method: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::features::inbound::Handler as InboundHandler;
+    use crate::features::outbound::Handler as OutboundHandler;
     
     #[tokio::test]
     async fn test_shadowsocks_protocol() {
@@ -245,8 +247,8 @@ mod tests {
         let server = ShadowsocksProtocol::new_server("test-server".to_string(), config.clone());
         let client = ShadowsocksProtocol::new_client("test-client".to_string(), config);
         
-        assert_eq!(server.tag(), "test-server");
-        assert_eq!(client.tag(), "test-client");
+        assert_eq!(InboundHandler::tag(&server), "test-server");
+        assert_eq!(OutboundHandler::tag(&client), "test-client");
         assert!(server.is_server);
         assert!(!client.is_server);
         
@@ -278,7 +280,7 @@ mod tests {
         let inbound = create_shadowsocks_inbound("test-in".to_string(), config.clone());
         let outbound = create_shadowsocks_outbound("test-out".to_string(), config);
         
-        assert_eq!(inbound.tag(), "test-in");
-        assert_eq!(outbound.tag(), "test-out");
+        assert_eq!(InboundHandler::tag(inbound.as_ref()), "test-in");
+        assert_eq!(OutboundHandler::tag(outbound.as_ref()), "test-out");
     }
 }

@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --locked --release
+      - name: Prepare package (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p dist
+          cp target/release/rust-core dist/
+          cp README.md dist/README.md
+          cp LICENSE dist/LICENSE || true
+          tar -czf rust-core-${{ runner.os }}.tar.gz -C dist .
+      - name: Prepare package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item target\release\rust-core.exe dist\
+          if (Test-Path README.md) { Copy-Item README.md dist\README.md }
+          if (Test-Path LICENSE) { Copy-Item LICENSE dist\LICENSE }
+          Compress-Archive -Path dist\* -DestinationPath rust-core-${{ runner.os }}.zip -Force
+      - name: Upload packaged artifact (Unix)
+        if: runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-core-${{ runner.os }}-package
+          path: rust-core-${{ runner.os }}.tar.gz
+      - name: Upload packaged artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-core-${{ runner.os }}-package
+          path: rust-core-${{ runner.os }}.zip
+
+  publish:
+    needs: build-and-package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/**
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

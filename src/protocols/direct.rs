@@ -127,13 +127,15 @@ pub fn create_direct_outbound(tag: String) -> Arc<dyn outbound::Handler> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::features::inbound::Handler as InboundHandler;
+    use crate::features::outbound::Handler as OutboundHandler;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     
     #[tokio::test]
     async fn test_direct_protocol() {
         let protocol = DirectProtocol::new("test".to_string());
         
-        assert_eq!(protocol.tag(), "test");
+        assert_eq!(InboundHandler::tag(&protocol), "test");
         assert!(protocol.start().await.is_ok());
         assert!(protocol.close().await.is_ok());
     }
@@ -143,7 +145,7 @@ mod tests {
         let inbound = create_direct_inbound("test-in".to_string());
         let outbound = create_direct_outbound("test-out".to_string());
         
-        assert_eq!(inbound.tag(), "test-in");
-        assert_eq!(outbound.tag(), "test-out");
+        assert_eq!(InboundHandler::tag(inbound.as_ref()), "test-in");
+        assert_eq!(OutboundHandler::tag(outbound.as_ref()), "test-out");
     }
 }
