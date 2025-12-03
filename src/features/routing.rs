@@ -314,6 +314,7 @@ impl Rule for SourcePortRule {
 pub struct DefaultRouter {
     rules: parking_lot::RwLock<Vec<Box<dyn Rule>>>,
     default_outbound: parking_lot::RwLock<String>,
+    domain_strategy: parking_lot::RwLock<Option<String>>,
 }
 
 impl DefaultRouter {
@@ -321,11 +322,17 @@ impl DefaultRouter {
         Self {
             rules: parking_lot::RwLock::new(Vec::new()),
             default_outbound: parking_lot::RwLock::new("direct".to_string()),
+            domain_strategy: parking_lot::RwLock::new(None),
         }
     }
     
     pub fn with_default_outbound(mut self, outbound: String) -> Self {
         *self.default_outbound.write() = outbound;
+        self
+    }
+
+    pub fn with_domain_strategy(mut self, strategy: String) -> Self {
+        *self.domain_strategy.write() = Some(strategy);
         self
     }
 }

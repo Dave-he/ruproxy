@@ -107,7 +107,8 @@ impl inbound::Handler for HttpInbound {
             stream.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n").await?;
             let (reader, writer) = stream.into_split();
             let link = crate::features::outbound::Link::new(Box::new(reader), Box::new(writer));
-            let ctx = crate::features::outbound::OutboundContext::new(addr, "tcp".to_string(), self.tag.clone());
+            let host = target.split(':').next().unwrap_or("").to_string();
+            let ctx = crate::features::outbound::OutboundContext::new(addr, "tcp".to_string(), self.tag.clone()).with_domain(host);
             Ok((ctx, link))
         } else {
             Err(crate::common::CoreError::ProtocolError("HTTP dispatch is CONNECT-only".to_string()))

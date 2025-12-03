@@ -13,6 +13,7 @@ pub struct OutboundContext {
     pub user_id: Option<String>,
     pub outbound_tag: String,
     pub source_addr: Option<std::net::SocketAddr>,
+    pub domain: Option<String>,
 }
 
 impl OutboundContext {
@@ -27,7 +28,15 @@ impl OutboundContext {
             user_id: None,
             outbound_tag,
             source_addr: None,
+            domain: None,
         }
+    }
+}
+
+impl OutboundContext {
+    pub fn with_domain(mut self, domain: String) -> Self {
+        self.domain = Some(domain);
+        self
     }
 }
 

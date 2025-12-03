@@ -110,6 +110,7 @@ impl inbound::Handler for SocksInbound {
         s.read_exact(&mut head).await?;
         if head[0] != 0x05 || head[1] != 0x01 { return Err(crate::common::CoreError::ProtocolError("SOCKS only CONNECT supported".to_string())); }
         let atyp = head[3];
+        let mut domain_opt: Option<String> = None;
         let destination_addr = match atyp {
             0x01 => {
                 let mut addr = [0u8; 4];
@@ -128,6 +129,7 @@ impl inbound::Handler for SocksInbound {
                 let mut port = [0u8; 2];
                 s.read_exact(&mut port).await?;
                 let host = String::from_utf8_lossy(&domain).to_string();
+                domain_opt = Some(host.clone());
                 let p = u16::from_be_bytes(port);
                 let addr = format!("{}:{}", host, p);
                 tokio::net::lookup_host(addr).await?.next().ok_or_else(|| crate::common::CoreError::NetworkError("DNS resolve failed".to_string()))?
@@ -146,7 +148,11 @@ impl inbound::Handler for SocksInbound {
         s.write_all(&[0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]).await?;
         let (reader, writer) = s.into_split();
         let link = crate::features::outbound::Link::new(Box::new(reader), Box::new(writer));
-        let ctx = crate::features::outbound::OutboundContext::new(destination_addr, "tcp".to_string(), self.tag.clone());
+        let ctx = if let Some(d) = domain_opt { 
+            crate::features::outbound::OutboundContext::new(destination_addr, "tcp".to_string(), self.tag.clone()).with_domain(d)
+        } else {
+            crate::features::outbound::OutboundContext::new(destination_addr, "tcp".to_string(), self.tag.clone())
+        };
         Ok((ctx, link))
     }
     fn receiver_settings(&self) -> Option<serde_json::Value> { serde_json::to_value(&self.config).ok() }

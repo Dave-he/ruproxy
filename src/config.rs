@@ -112,6 +112,9 @@ pub struct StreamSettings {
     /// HTTP/2 settings
     pub http_settings: Option<HttpSettings>,
     
+    /// gRPC settings
+    pub grpc_settings: Option<GrpcSettings>,
+    
     /// Socket settings
     pub socket_settings: Option<SocketSettings>,
 }
@@ -133,6 +136,9 @@ pub struct TlsSettings {
     
     /// Certificate chain
     pub certificates: Option<Vec<Certificate>>,
+
+    /// ALPN protocols
+    pub alpn: Option<Vec<String>>,
 }
 
 /// Certificate configuration
@@ -188,6 +194,16 @@ pub struct HttpSettings {
     
     /// Health check timeout
     pub health_check_timeout: Option<u64>,
+}
+
+/// gRPC settings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GrpcSettings {
+    /// Service name
+    pub service_name: Option<String>,
+    
+    /// Idle timeout
+    pub idle_timeout: Option<u64>,
 }
 
 /// Socket settings

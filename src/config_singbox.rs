@@ -25,6 +25,7 @@ pub fn from_singbox_json(json: &str) -> CoreResult<Config> {
                             certificate_file: tls.get("certificate_file").and_then(|x| x.as_str()).map(|s| s.to_string()),
                             key_file: tls.get("key_file").and_then(|x| x.as_str()).map(|s| s.to_string()),
                             certificates: None,
+                            alpn: tls.get("alpn").and_then(|x| x.as_array()).map(|xs| xs.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()),
                         });
                     }
                 }
@@ -60,6 +61,10 @@ pub fn from_singbox_json(json: &str) -> CoreResult<Config> {
                     tcp_settings,
                     ws_settings,
                     http_settings,
+                    grpc_settings: transport.get("grpc").and_then(|x| x.as_object()).map(|g| crate::config::GrpcSettings {
+                        service_name: g.get("service_name").and_then(|x| x.as_str()).map(|s| s.to_string()),
+                        idle_timeout: g.get("idle_timeout").and_then(|x| x.as_u64()),
+                    }),
                     socket_settings: None,
                 });
             }
@@ -90,6 +95,7 @@ pub fn from_singbox_json(json: &str) -> CoreResult<Config> {
                             certificate_file: tls.get("certificate_file").and_then(|x| x.as_str()).map(|s| s.to_string()),
                             key_file: tls.get("key_file").and_then(|x| x.as_str()).map(|s| s.to_string()),
                             certificates: None,
+                            alpn: tls.get("alpn").and_then(|x| x.as_array()).map(|xs| xs.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()),
                         });
                     }
                 }
@@ -125,6 +131,10 @@ pub fn from_singbox_json(json: &str) -> CoreResult<Config> {
                     tcp_settings,
                     ws_settings,
                     http_settings,
+                    grpc_settings: transport.get("grpc").and_then(|x| x.as_object()).map(|g| crate::config::GrpcSettings {
+                        service_name: g.get("service_name").and_then(|x| x.as_str()).map(|s| s.to_string()),
+                        idle_timeout: g.get("idle_timeout").and_then(|x| x.as_u64()),
+                    }),
                     socket_settings: None,
                 });
             }
@@ -197,6 +207,37 @@ mod tests {
         assert_eq!(ss.ws_settings.as_ref().unwrap().path.as_deref(), Some("/ws"));
         let outbound = &cfg.outbounds[0];
         assert_eq!(outbound.stream_settings.as_ref().unwrap().network.as_deref(), Some("tcp"));
+    }
+
+    #[test]
+    fn parse_tls_alpn_h2_grpc() {
+        let json = r#"{
+            "inbounds": [{
+                "type":"http","listen":"0.0.0.0","listen_port":8080,
+                "transport": {
+                    "type":"h2",
+                    "http": {"host":["h2.example"], "path":"/h2"},
+                    "tls": {"enabled": true, "alpn": ["h2"], "server_name":"h2.example"},
+                    "grpc": {"service_name":"echo", "idle_timeout": 30}
+                }
+            }],
+            "outbounds": [{
+                "type":"direct",
+                "transport": {"type":"grpc", "grpc": {"service_name":"echo"}}
+            }]
+        }"#;
+        let cfg = from_singbox_json(json).unwrap();
+        let inbound = &cfg.inbounds[0];
+        let ss = inbound.stream_settings.as_ref().unwrap();
+        assert_eq!(ss.network.as_deref(), Some("h2"));
+        assert_eq!(ss.http_settings.as_ref().unwrap().path.as_deref(), Some("/h2"));
+        let tls = ss.tls_settings.as_ref().unwrap();
+        assert_eq!(tls.server_name.as_deref(), Some("h2.example"));
+        assert_eq!(tls.alpn.as_ref().unwrap(), &vec!["h2".to_string()]);
+        let grpc = ss.grpc_settings.as_ref().unwrap();
+        assert_eq!(grpc.service_name.as_deref(), Some("echo"));
+        let ob = &cfg.outbounds[0];
+        assert_eq!(ob.stream_settings.as_ref().unwrap().network.as_deref(), Some("grpc"));
     }
 
     #[test]

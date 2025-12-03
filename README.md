@@ -59,7 +59,14 @@ cargo run -- generate -o config.json
 
 ### Run the Proxy
 
-```bash
+```powershell
+# 一键准备
+./scripts/setup.ps1
+
+# 启动（使用 config.json）
+./scripts/run.ps1 -Config config.json
+
+# 直接运行
 cargo run -- run -c config.json
 ```
 
@@ -121,8 +128,13 @@ The configuration format is similar to Xray-core but adapted for Rust-Core:
 ## Supported Protocols
 
 ### Inbound Protocols
-- **Direct**: Direct TCP connections
-- **Shadowsocks**: Shadowsocks server
+- **Direct**
+- **Shadowsocks**
+- **SOCKS**
+- **HTTP**
+
+### 使用文档
+- 详见 `USAGE.md`
 
 ### Outbound Protocols
 - **Direct/Freedom**: Direct connections to destination

@@ -3,7 +3,7 @@ use rust_core::{
     config::Config,
     core::{Instance, new_with_defaults},
     features::{inbound, outbound, routing},
-    protocols::{direct, shadowsocks, create_socks_inbound, SocksConfig, create_http_inbound, HttpInboundConfig, create_tcp_forward_inbound, TcpForwardConfig, create_https_inbound, HttpsInboundConfig},
+    protocols::{direct, shadowsocks, create_socks_inbound, SocksConfig, create_http_inbound, HttpInboundConfig, create_tcp_forward_inbound, TcpForwardConfig, create_https_inbound, HttpsInboundConfig, create_tls_outbound, TlsOutboundConfig},
     CoreResult,
 };
 use rust_core::Runnable;
@@ -173,6 +173,11 @@ async fn run_server(config_path: PathBuf, test_only: bool) -> CoreResult<()> {
                     outbound_mgr.add_handler(handler).await?;
                 }
             }
+            "tls" => {
+                let cfg = if let Some(settings) = &outbound_config.settings { serde_json::from_value::<TlsOutboundConfig>(settings.clone())? } else { TlsOutboundConfig { allow_insecure: Some(true), alpn_protocols: None, server_name: None } };
+                let handler = create_tls_outbound(tag, cfg);
+                outbound_mgr.add_handler(handler).await?;
+            }
             protocol => {
                 error!("Unsupported outbound protocol: {}", protocol);
                 return Err(rust_core::CoreError::InvalidConfiguration(
@@ -189,6 +194,7 @@ async fn run_server(config_path: PathBuf, test_only: bool) -> CoreResult<()> {
             r = r.with_default_outbound(default);
         }
         if let Some(routing_cfg) = &config.routing {
+            if let Some(ds) = &routing_cfg.domain_strategy { r = r.with_domain_strategy(ds.clone()); }
             for rule in &routing_cfg.rules {
                 let outbound = rule.outbound_tag.clone();
                 if let Some(domains) = &rule.domain {
@@ -202,6 +208,22 @@ async fn run_server(config_path: PathBuf, test_only: bool) -> CoreResult<()> {
                         let rr = Box::new(routing::IpRule::new(cidrs, outbound.clone()));
                         let _ = r.add_rule(rr, false).await;
                     }
+                }
+                if let Some(in_tags) = &rule.inbound_tag {
+                    let rr = Box::new(routing::InboundTagRule::new(in_tags.clone(), outbound.clone()));
+                    let _ = r.add_rule(rr, false).await;
+                }
+                if let Some(protocols) = &rule.protocol {
+                    let rr = Box::new(routing::ProtocolRule::new(protocols.clone(), outbound.clone()));
+                    let _ = r.add_rule(rr, false).await;
+                }
+                if let Some(port) = &rule.port {
+                    let rr = Box::new(routing::PortRule::new(port, outbound.clone()));
+                    let _ = r.add_rule(rr, false).await;
+                }
+                if let Some(sport) = &rule.source_port {
+                    let rr = Box::new(routing::SourcePortRule::new(sport, outbound.clone()));
+                    let _ = r.add_rule(rr, false).await;
                 }
             }
         }
@@ -272,9 +294,10 @@ async fn run_server(config_path: PathBuf, test_only: bool) -> CoreResult<()> {
                                 if protocol_c == "socks" || protocol_c == "http" || protocol_c == "tcp" || protocol_c == "https" {
                                     match handler.prepare_dispatch(stream, &ictx).await {
                                         Ok((out_ctx, link)) => {
-                                            let rctx = routing::Context::new(peer, out_ctx.destination_addr)
+                                            let mut rctx = routing::Context::new(peer, out_ctx.destination_addr)
                                                 .with_inbound_tag(tag_c.clone())
                                                 .with_protocol(protocol_c.clone());
+                                            if let Some(d) = out_ctx.domain.clone() { rctx = rctx.with_domain(d); }
                                             let route = router_c.pick_route(&rctx).await.ok();
                                             let ob = route
                                                 .and_then(|rt| outbound_mgr_cloned.get_handler(&rt.outbound_tag))
@@ -353,6 +376,7 @@ async fn generate_config(output_path: PathBuf) -> CoreResult<()> {
         certificate_file: Some("server.crt".to_string()),
         key_file: Some("server.key".to_string()),
         certificates: None,
+        alpn: None,
     } };
     config.inbounds.push(rust_core::config::InboundConfig {
         tag: Some("https-in".to_string()),
@@ -406,6 +430,16 @@ async fn generate_config(output_path: PathBuf) -> CoreResult<()> {
         proxy_settings: None,
     });
     
+    // Add TLS outbound for direct TLS to target
+    let tls_out_cfg = TlsOutboundConfig { allow_insecure: Some(true), alpn_protocols: None, server_name: None };
+    config.outbounds.push(rust_core::config::OutboundConfig {
+        tag: Some("tls-out".to_string()),
+        protocol: "tls".to_string(),
+        settings: Some(serde_json::to_value(tls_out_cfg)?),
+        stream_settings: None,
+        proxy_settings: None,
+    });
+
     // Add sample routing
     config.routing = Some(rust_core::config::RoutingConfig {
         domain_strategy: Some("IPIfNonMatch".to_string()),
@@ -429,7 +463,7 @@ async fn generate_config(output_path: PathBuf) -> CoreResult<()> {
             rust_core::config::RoutingRule {
                 tag: Some("proxy-rule".to_string()),
                 rule_type: Some("field".to_string()),
-                domain: None,
+                domain: Some(vec!["example.com".to_string()]),
                 ip: None,
                 port: None,
                 source_port: None,
@@ -439,7 +473,7 @@ async fn generate_config(output_path: PathBuf) -> CoreResult<()> {
                 inbound_tag: None,
                 protocol: None,
                 attrs: None,
-                outbound_tag: "ss-out".to_string(),
+                outbound_tag: "tls-out".to_string(),
                 balancer_tag: None,
             },
         ],
