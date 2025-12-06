@@ -164,11 +164,13 @@ impl Runnable for DefaultManager {
 #[async_trait]
 impl Manager for DefaultManager {
     fn get_handler(&self, tag: &str) -> Option<Arc<dyn Handler>> {
-        self.handlers.read().get(tag).cloned()
+        let handlers = self.handlers.read();
+        handlers.get(tag).cloned()
     }
     
     fn get_default_handler(&self) -> Option<Arc<dyn Handler>> {
-        self.default_handler.read().clone()
+        let default = self.default_handler.read();
+        default.clone()
     }
     
     async fn add_handler(&self, handler: Arc<dyn Handler>) -> CoreResult<()> {
@@ -215,7 +217,8 @@ impl Manager for DefaultManager {
     }
     
     fn list_handlers(&self) -> Vec<Arc<dyn Handler>> {
-        self.handlers.read().values().cloned().collect()
+        let handlers = self.handlers.read();
+        handlers.values().cloned().collect()
     }
 }
 
